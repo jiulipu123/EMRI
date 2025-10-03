@@ -18,6 +18,7 @@ class LQGWaveformGenerator:
         #单位转换
         self.M_sec=M_sol*GM_SUN_S
         self.m_sec=m_sol*GM_SUN_S
+
         self.mu_sec=self.m_sec
         self.mu=self.mu_sec/self.M_sec
         self.eta=self.mu
@@ -25,14 +26,14 @@ class LQGWaveformGenerator:
         self.T_obs=T_obs_yr*31536000/self.M_sec
 
     def get_orbital_frequencies(self,p,e):
-        omega_phi_sq=(1/p**3)*(1+self.r0/(2*p))*(3-e**2)
+        omega_phi_sq=(1/p**3)*(1+(self.r0/(2*p))*(3-e**2))
         omega_phi=np.sqrt(omega_phi_sq)
         delta_r_phi=2*np.pi*(1+(3/p)+(self.r0/(4*p**2))*(15-e**2))
         omega_r=2*np.pi*omega_phi/delta_r_phi
         return omega_r,omega_phi
     
     def get_fluxes(self,p,e):
-        f_E_GR=(1+(73/24)*e**2*(37/96)*e**4)
+        f_E_GR=(1+(73/24)*e**2+(37/96)*e**4)
         f_L_GR=(1+(7/8)*e**2)
 
         dEdt_GR=-(32/5)*self.eta**2*(1-e**2)**(3/2)/p**5*f_E_GR
@@ -46,6 +47,7 @@ class LQGWaveformGenerator:
         dEdt=dEdt_GR+dEdt_LQG
         dLdt=dLdt_GR+dLdt_LQG
         return dEdt,dLdt
+    
     def evolution_ode(self,t,y):
         p,e,_,_=y
         if e<0 or p<2*(1+e):
@@ -73,16 +75,18 @@ class LQGWaveformGenerator:
             self.evolution_ode,
             t_span,
             y0,
-            method='RK45'
+            method='RK45',
             dense_output=True,
             events=stop_condition,
             rtol=1e-9,atol=1e-10
         )
         self.evolution_results=sol
         return sol
+    
     def generate_waveform(self,times,incl,phi0):
         sol=self.evolution_results.sol
         p_t,e_t,phi_r_t,phi_phi_t_rel=sol(times)
+        _,omega_phi_vals=self.get_orbital_frequencies(p_t,e_t)
         phi_phi_t=phi_phi_t_rel+phi0
         amp_factor=2*self.mu/self.D_L
         h_plus=np.zeros_like(times)
@@ -98,7 +102,14 @@ class LQGWaveformGenerator:
             J_n_plus_1=jv(n+1,arg)
             J_n_plus_2=jv(n+2,arg)
             g_n=n*phi_phi_t+phi_r_t
-            A_n=-amp_factor*(n*omega_phi_t(p_t,e_t))**(2/3)*((1+cos_i**2)*(J_n_minus_2-2*e_t*J_n_minus_1+(2/n)*J_n+2*e_t*J_n_plus_1-J_n_plus_2)*np.cos(g_n)-sin_i**2*(J_n_minus_2-2*J_n+J_n_plus_2)*np.cos(g_n))
-            B_n=-amp_factor*(n*omega_phi_t(p_t,e_t))**(2/3)*(-2*cos_i*(J_n_minus_2-2*e_t*J_n_minus_1+(2/n)*J_n-2*e_t*J_n_plus_1+J_n_plus_2)*np.sin(g_n))
+
+            term1=-(1+cos_i**2)*np.cos(g_n)*(J_n_minus_2-2*e_t*J_n_minus_1+2/n*J_n+2*e_t*J_n_plus_1-J_n_plus_2)
+            term2=sin_i**2*np.cos(g_n)*(J_n_minus_2-2*J_n+J_n_plus_2)
+            h_plus_n=term1+term2
+            h_cross_n=-2*cos_i*np.sin(g_n)*(J_n_minus_2-2*e_t*J_n_minus_1+2/n*J_n-2*e_t*J_n_plus_1+J_n_plus_2)
+            commom_amp=amp_factor*(n*omega_phi_vals)**(2/3)
+            h_plus+=commom_amp*h_plus_n
+            h_cross+=commom_amp*h_cross_n
+            
         return h_plus,h_cross
     
